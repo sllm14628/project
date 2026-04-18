@@ -190,3 +190,53 @@
 .btn-send:not(:disabled):hover {
   transform: scale(1.05);
 }
+
+/* Time & Stream Indicators */
+.message-wrapper-outer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.message-wrapper-outer.user {
+  align-items: flex-end;
+}
+
+.message-wrapper-outer.model {
+  align-items: flex-start;
+}
+
+.message-meta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.user-meta {
+  padding-right: 8px;
+}
+
+.model-meta {
+  padding-left: 8px;
+}
+
+.duration-indicator, .streaming-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0,0,0,0.2);
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.streaming-indicator {
+  color: var(--accent-secondary);
+}
+
+.duration-indicator {
+  color: var(--success);
+}
+

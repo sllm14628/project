@@ -1,42 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Sparkles, Paperclip } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Paperclip, Loader2, Clock } from 'lucide-react';
 import './Dashboard.css';
+
+const formatTime = (date) => {
+  const h = date.getHours().toString().padStart(2, '0');
+  const m = date.getMinutes().toString().padStart(2, '0');
+  const s = date.getSeconds().toString().padStart(2, '0');
+  const ms = date.getMilliseconds().toString().padStart(3, '0');
+  return `${h}:${m}:${s}.${ms}`;
+};
 
 const Dashboard = ({ activeModels }) => {
   const [input, setInput] = useState('');
-  
-  // App.jsx에서 전달받은 활성화된 모델 리스트
-  const availableModels = activeModels;
-  
   const [messages, setMessages] = useState([
-    { id: 1, type: 'user', text: 'RAG 시스템의 주요 장점이 무엇인가요?' },
     { 
-      id: 2, 
-      type: 'model', 
-      modelName: 'Llama 3 (8B)',
-      text: 'RAG(검색 증강 생성) 시스템은 모델 재학습 없이도 최신 지식을 검색하여 신뢰성 있는 답변을 생성합니다.'
-    },
-    { 
-      id: 3, 
-      type: 'model', 
-      modelName: 'Mistral (v0.3)',
-      text: '비용 효율성과 도메인 특화 문서 기반의 정확한 답변 제공이 주요 장점입니다.'
-    },
-    { 
-      id: 4, 
-      type: 'model', 
-      modelName: 'Qwen 1.5',
-      text: '할루시네이션(환각) 현상을 최소화하고 정보의 출처를 사용자에게 제공할 수 있는 점이 돋보입니다.'
-    },
-    { 
-      id: 5, 
-      type: 'model', 
-      modelName: 'Gemma (7B)',
-      text: '검색된 문맥을 바탕으로 답변을 제한하므로 기업 내부 규정이나 민감한 정보 보호에 유리합니다.'
+      id: 1, 
+      type: 'user', 
+      text: '스트리밍 테스트 준비가 되었습니다. 자유롭게 대화를 시작해 보세요!', 
+      timestamp: formatTime(new Date()) 
     }
   ]);
 
-  // 각 컬럼의 스크롤을 하단으로 유지하기 위한 Ref 배열
   const messagesEndRefs = useRef([]);
 
   const scrollToBottom = () => {
@@ -49,25 +33,106 @@ const Dashboard = ({ activeModels }) => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || activeModels.length === 0) return;
     
-    // Add user message
-    const newMessage = { id: Date.now(), type: 'user', text: input };
-    setMessages([...messages, newMessage]);
+    const now = new Date();
+    // 사용자 메시지 기록
+    const userMessage = { 
+      id: Date.now(), 
+      type: 'user', 
+      text: input,
+      timestamp: formatTime(now)
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    
+    const currentInput = input;
     setInput('');
     
-    // Simulate model responses for ALL models
-    setTimeout(() => {
-      const newResponses = availableModels.map((model, index) => ({
-        id: Date.now() + index + 1,
-        type: 'model',
-        modelName: model,
-        text: `${model}의 분석 결과:\n\n요청하신 "${input}"에 대해 문서를 기반으로 처리한 내용입니다.`
-      }));
-      setMessages(prev => [...prev, ...newResponses]);
-    }, 1000);
+    // 각 모델별 로딩 상태 (Placeholders) 생성
+    const loadingMessages = activeModels.map((model, index) => ({
+      id: Date.now() + index + 1,
+      type: 'model',
+      modelName: model.name,
+      modelId: model.id,
+      text: '',
+      isLoading: true,
+      isStreaming: false,
+      startTime: Date.now(), // 요청 시작 시간
+      endTime: null,
+      duration: null,
+    }));
+    
+    setMessages(prev => [...prev, ...loadingMessages]);
+
+    // 각 활성화된 모델로 비동기 동시 요청
+    loadingMessages.forEach(async (msgStub) => {
+      try {
+        const response = await fetch('http://localhost:11434/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // stream: true 설정으로 스트리밍 활성화
+          body: JSON.stringify({ model: msgStub.modelId, prompt: currentInput, stream: true })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP Error: ${response.status}`);
+        }
+
+        // 스트림 읽기 준비
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let fullText = '';
+        
+        // 로딩 종료 -> 스트리밍 시작 상태로 전환
+        setMessages(prev => prev.map(msg => 
+          msg.id === msgStub.id ? { ...msg, isLoading: false, isStreaming: true } : msg
+        ));
+
+        // 스트림 데이터 청크(Chunk) 단위로 읽어오기
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.response) {
+                fullText += parsed.response;
+                // UI 실시간 업데이트
+                setMessages(prev => prev.map(msg => 
+                  msg.id === msgStub.id ? { ...msg, text: fullText } : msg
+                ));
+              }
+            } catch (e) {
+              console.error("JSON 파싱 에러:", line, e);
+            }
+          }
+        }
+        
+        // 스트리밍 종료 -> 소요 시간 계산
+        const endTime = Date.now();
+        const duration = ((endTime - msgStub.startTime) / 1000).toFixed(2); // 초 단위 변환
+        
+        setMessages(prev => prev.map(msg => 
+          msg.id === msgStub.id 
+            ? { ...msg, isStreaming: false, endTime, duration } 
+            : msg
+        ));
+        
+      } catch (error) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === msgStub.id 
+            ? { ...msg, text: `Error: 통신 실패. Ollama가 켜져 있는지 확인하세요.\n\n상세: ${error.message}`, isLoading: false, isStreaming: false } 
+            : msg
+        ));
+      }
+    });
   };
 
   return (
@@ -76,32 +141,61 @@ const Dashboard = ({ activeModels }) => {
       <header className="dashboard-header glass-panel">
         <div className="header-title">
           <Sparkles className="accent-icon" />
-          <h2>Model Comparison ({availableModels.length} Models Active)</h2>
+          <h2>Model Comparison ({activeModels.length} Models Active)</h2>
         </div>
       </header>
 
       {/* Main Chat Area */}
       <div className="chat-area">
         <div className="chat-grid">
-          {availableModels.map((model, index) => (
-            <div key={model} className="chat-column glass-panel">
+          {activeModels.map((model, index) => (
+            <div key={model.id} className="chat-column glass-panel">
               <div className="column-header">
                 <Bot size={18} />
-                <h3>{model}</h3>
+                <h3>{model.name}</h3>
               </div>
               <div className="message-list">
-                {messages.filter(m => m.type === 'user' || m.modelName === model).map((msg) => (
-                  <div key={msg.id} className={`message-wrapper ${msg.type}`}>
-                    <div className={`message-bubble ${msg.type}`}>
-                      {msg.type === 'user' ? <User size={16} className="msg-icon" /> : <Bot size={16} className="msg-icon" />}
-                      <div className="msg-text">{msg.text}</div>
+                {messages.filter(m => m.type === 'user' || m.modelName === model.name).map((msg) => (
+                  <div key={msg.id} className={`message-wrapper-outer ${msg.type}`}>
+                    <div className={`message-wrapper ${msg.type}`}>
+                      <div className={`message-bubble ${msg.type} ${msg.isLoading ? 'loading' : ''}`}>
+                        {msg.type === 'user' ? <User size={16} className="msg-icon" /> : <Bot size={16} className="msg-icon" />}
+                        <div className="msg-text">
+                          {msg.isLoading ? (
+                            <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8'}}>
+                              <Loader2 size={16} className="animate-spin" style={{animation: 'spin 1s linear infinite'}} /> 
+                              <span>연결 중...</span>
+                            </div>
+                          ) : (
+                            msg.text
+                          )}
+                        </div>
+                      </div>
                     </div>
+                    {/* 메타데이터 (시간 정보) */}
+                    {msg.type === 'user' && (
+                      <div className="message-meta user-meta">{msg.timestamp}</div>
+                    )}
+                    {msg.type === 'model' && !msg.isLoading && (
+                      <div className="message-meta model-meta">
+                        {msg.isStreaming ? (
+                           <span className="streaming-indicator"><Loader2 size={12} className="animate-spin" style={{animation: 'spin 1s linear infinite'}} /> 생성 중...</span>
+                        ) : (
+                           <span className="duration-indicator"><Clock size={12} /> {msg.duration}s 소요됨</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div ref={el => messagesEndRefs.current[index] = el} />
               </div>
             </div>
           ))}
+          {activeModels.length === 0 && (
+            <div style={{width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8'}}>
+              Settings 메뉴에서 모델을 하나 이상 활성화해 주세요.
+            </div>
+          )}
         </div>
       </div>
 
@@ -114,11 +208,12 @@ const Dashboard = ({ activeModels }) => {
           <input
             type="text"
             className="chat-input"
-            placeholder={`모든 활성화된 모델(${availableModels.length}개)에게 질문을 입력하세요...`}
+            placeholder={activeModels.length > 0 ? `모든 활성화된 모델(${activeModels.length}개)에게 질문을 입력하세요...` : "모델을 먼저 활성화해 주세요."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            disabled={activeModels.length === 0}
           />
-          <button type="submit" className="btn-send" disabled={!input.trim()}>
+          <button type="submit" className="btn-send" disabled={!input.trim() || activeModels.length === 0}>
             <Send size={20} />
           </button>
         </form>

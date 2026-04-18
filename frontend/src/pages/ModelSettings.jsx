@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Settings2, Server, Power, RefreshCw, CheckCircle2, AlertCircle, DownloadCloud, HardDrive } from 'lucide-react';
 import './ModelSettings.css';
 
-const ModelSettings = ({ models, toggleModelActive }) => {
+const ModelSettings = ({ models, toggleModelActive, refreshModels }) => {
   const [endpoint, setEndpoint] = useState('http://localhost:11434');
   const [connectionStatus, setConnectionStatus] = useState('connected'); // 'none', 'testing', 'connected', 'error'
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -16,11 +16,12 @@ const ModelSettings = ({ models, toggleModelActive }) => {
     }, 1500);
   };
 
-  const handleRefreshModels = () => {
+  const handleRefreshModels = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 1000);
+    if (refreshModels) {
+      await refreshModels();
+    }
+    setIsRefreshing(false);
   };
 
   const handlePullModel = (e) => {
